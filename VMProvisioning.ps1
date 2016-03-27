@@ -1,17 +1,13 @@
 ﻿#requires -version 4.0
 
 
-#Key-Value pairs to make sure the modules needed are installed
-#Rigth hand side is the DSC resource and left side the module that contains the resource
-#i.e - If the script needs the DSC resource XVMSwitch , which is part of the module xHyper-V, add an entry saying "XVMSwitch" = "XHyper-V"
-$DSCResources = @{"xVMHyperV" = "xHyper-V"
-                    "xVMSwitch" = "xHyper-V"
-                    "xDismFeature" = "xDismFeature"
-                }
+$DSCResources = ("xHyper-V")
 
-foreach ($DSCResource in $DSCResources.GetEnumerator()){
-    If(!(Get-DscResource -Name $DSCResource.Name)){
-        Install-Module -Name $DSCResource.Value -Force
+$InstalledResources = ((Get-DscResource).ModuleName | select -Unique)
+
+foreach ($DSCResource in $DSCResources){
+    If($DSCResource -notin $InstalledResources){
+        Install-Module -Name $DSCResource -Force
     }
 }
 
@@ -21,7 +17,8 @@ Configuration VMProvisioning{
     param(
         [string]$computername,
         [string[]]$vmnames,
-        [string]$VHDFilePath
+        [string]$VHDFilePath,
+        [string]$Domain
     )    
 
     Import-DscResource -module xDismFeature, XHyper-V
@@ -47,24 +44,55 @@ Configuration VMProvisioning{
         DependsOn =  '[xDismFeature]HyperV'
     }
     
-    File VHDIsPresent{
+    File BaseVHDIsPresent{
             Ensure = 'Present'
             DestinationPath = $VHDFilePath          
-    }            
+    }
+                
         
     foreach ($VMName in $VMNames){
 
         File "VHDCopy_$VMName"{
-            DependsOn = "[File]VHDIsPresent"
-            DestinationPath = (Join-Path "C:\VM\" ((Get-Item $VHDFilePath).BaseName + "_$VMName" + ".vhd"))
+            DependsOn = "[File]BaseVHDIsPresent"
+            DestinationPath = (Join-Path "C:\VM\" ($Domain + "-$VMName" + ".vhd"))
             SourcePath = $VHDFilePath
             Ensure = 'Present'
             Type = 'File'            
-        }        
+        }
+        File "VMPath_$VMName"{
+            DependsOn = "[File]VHDCopy_$VMName"
+            DestinationPath = (Join-Path "C:\VM\" ($Domain + "-$VMName"))
+            Ensure = 'Present'
+            Type = 'Directory'            
+        }
+        xVMHyperV "VMPath_$vmname"
+        {
+            Ensure          = 'Present'
+            Name            = "$Domain-$VMName"
+            VhdPath         = (Join-Path "C:\VM\" ($Domain + "-$VMName" + ".vhd"))
+            SwitchName      = 'ExternalVirtualSwitch'
+            Path            = (Join-Path "C:\VM\" ($Domain + "-$VMName"))
+            Generation      = 1
+            StartupMemory   = 512mb
+            MaximumMemory   = 512mb          
+            ProcessorCount  = 1
+            State = 'Running'
+            DependsOn       = "[File]VMPath_$VMName",'[xVMSwitch]ExternalSwitch'
+        }
+              
         
     }    
 }
 
-VMprovisioning -computername $env:COMPUTERNAME -OutputPath C:\Github\DSCResources\FeaturesTest
+$Params = @{
+            Computername = $env:COMPUTERNAME
+            OutputPath = "C:\Github\DSCResources\FeaturesTest"
+            VHDFIlePath = "C:\VM\Base\Nano-TP4.vhd"
+            VMNames = ("VM1","VM2")
+            Domain = "NY"
+
+        }
+
+VMprovisioning @params
 
 Start-DscConfiguration C:\github\DSCResources\FeaturesTest -wait -Force
