@@ -1,7 +1,7 @@
 ﻿#requires -version 4.0
 
 #region DSC Resources
-$DSCResources = ("xHyper-V","TrustedHostResource")
+$DSCResources = ("xHyper-V","TrustedHostResource","XSmbShare")
 
 $InstalledResources = ((Get-DscResource).ModuleName | select -Unique)
 
@@ -22,7 +22,20 @@ Configuration VMDeProvisioning{
         [string]$BatchName
     )    
 
-    Import-DscResource -module xDismFeature, XHyper-V, TrustedHostResource
+    Import-DscResource -module xDismFeature, XHyper-V, TrustedHostResource, Xsmbshare
+
+    File "Create Share Folder"{
+        Ensure = 'Present'
+        DestinationPath = "c:\Share"
+        Type = "Directory"
+    }
+    xSmbShare "Adding new host"
+    {            
+        Ensure = 'present'
+        Path = "c:\share"           
+        DependsOn = "[File]Create Share Folder"
+        Name = "c"
+    }   
 
     xDismFeature HyperV
     {
@@ -68,7 +81,7 @@ Configuration VMDeProvisioning{
             SwitchName      = 'ExternalVirtualSwitch'
             Path            = (Join-Path "C:\VM\" ($Domain + "-$VMName"))
             Generation      = 1
-            StartupMemory   = 300mb
+            StartupMemory   = 128mb
             MaximumMemory   = 512mb          
             ProcessorCount  = 1            
             State = 'Running'
@@ -95,7 +108,7 @@ Configuration VMDeProvisioning{
 #endregion
 
 #region Configuration
-$VMs = ("VM2","VM3","VM4") #VM Name will be $Domain-$VM
+$VMs = ("VM1") #VM Name will be $Domain-$VM
 $Domain = "NY"
 $MOFPath = "C:\Github\DSCResources\VMDeprovisioning"
 
