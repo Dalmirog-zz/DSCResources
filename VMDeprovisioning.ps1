@@ -12,7 +12,7 @@ foreach ($DSCResource in $DSCResources){
 }
 
 
-Configuration VMProvisioning{
+Configuration VMDeProvisioning{
 
     param(
         [string]$computername,
@@ -53,22 +53,16 @@ Configuration VMProvisioning{
         
     foreach ($VMName in $VMNames){
 
-        File "VHDCopy_$VMName"{
-            DependsOn = "[File]BaseVHDIsPresent"
-            DestinationPath = (Join-Path "C:\VM\" ($Domain + "-$VMName" + ".vhd"))
-            SourcePath = $VHDFilePath
-            Ensure = 'Present'
-            Type = 'File'            
+        $VMIP = ((Get-VM "$Domain-$VMName").NetworkAdapters).ipaddresses[0]
+
+        TrustedHost "Remove $VMName IP from trusted host"{
+            Ensure = 'Absent'
+            Name = $VMIP
         }
-        File "VMPath_$VMName"{
-            DependsOn = "[File]VHDCopy_$VMName"
-            DestinationPath = (Join-Path "C:\VM\" ($Domain + "-$VMName"))
-            Ensure = 'Present'
-            Type = 'Directory'            
-        }
-        xVMHyperV "VMCreate_$vmname"
+
+        xVMHyperV "VMPath_$vmname"
         {
-            Ensure          = 'Present'
+            Ensure          = 'Absent'
             Name            = "$Domain-$VMName"
             VhdPath         = (Join-Path "C:\VM\" ($Domain + "-$VMName" + ".vhd"))
             SwitchName      = 'ExternalVirtualSwitch'
@@ -78,62 +72,45 @@ Configuration VMProvisioning{
             MaximumMemory   = 512mb          
             ProcessorCount  = 1            
             State = 'Running'
-            DependsOn       = "[File]VMPath_$VMName",'[xVMSwitch]ExternalSwitch'
+            DependsOn       = "[TrustedHost]Remove $VMName IP from trusted host"
             WaitForIP = $True
             Notes = $batchname
-        }             
-        
-    }    
-}
-
-Configuration VMConfiguration{
-    param(
-        [string]$computername,
-        [string[]]$vmnames,
-        [string]$Domain        
-    )
-    Import-DscResource -module TrustedHostResource
-
-    foreach ($VMName in $vmnames){
-        TrustedHost "Add $VMName IP to trusted host"{
-            Ensure = 'Present'
-            Name = ((Get-VM "$Domain-$VMName").NetworkAdapters).ipaddresses[0]
         }
-    }
+
+        File "VHDCopy_$VMName"{
+            DependsOn = "[xVMHyperV]VMPath_$vmname"
+            DestinationPath = (Join-Path "C:\VM\" ($Domain + "-$VMName" + ".vhd"))            
+            Ensure = 'Absent'
+            Type = 'File'            
+        }
+        File "VMPath_$VMName"{
+            DependsOn = "[xVMHyperV]VMPath_$vmname"
+            DestinationPath = (Join-Path "C:\VM\" ($Domain + "-$VMName"))
+            Ensure = 'Absent'
+            Type = 'Directory'
+            Force = $True         
+        }
+    }    
 }
 #endregion
 
 #region Configuration
-
-$VMs = ("VM1","VM2","VM3","VM4") #VM Name will be $Domain-$VM
+$VMs = ("VM2","VM3","VM4") #VM Name will be $Domain-$VM
 $Domain = "NY"
+$MOFPath = "C:\Github\DSCResources\VMDeprovisioning"
 
-$MOFPath = @{Provisioning = "C:\Github\DSCResources\VMProvisioning"
-            Configuration = "C:\Github\DSCResources\VMConfiguration"
-            }
-
-$ProvisioningParams = @{
+$Params = @{
             Computername = $env:COMPUTERNAME
-            OutputPath = $MOFPath.Provisioning
+            OutputPath = $MOFPath
             VHDFIlePath = "C:\VM\Base\Nano-TP4.vhd"
             VMNames = $VMs
             Domain = $Domain
             BatchName = "DSCTest"
         }
-$ConfigurationParams = @{
-            Computername = $env:COMPUTERNAME
-            OutputPath = $MOFPath.Configuration
-            VMNames = $VMs
-            Domain = $Domain            
-        }
 #endregion
 
 #region Process
-VMprovisioning @Provisioningparams
+VMDeProvisioning @params
 
-Start-DscConfiguration $MOFPath.Provisioning -wait -Force
-
-VMConfiguration @Configurationparams
-
-Start-DscConfiguration $MOFPath.Configuration -wait -Force
+Start-DscConfiguration $MOFPath -wait -Force
 #endregion
